@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { logger } from '@utils/logger';
+import { getBackendStatus } from '../../lib/api/backendApi';
 import { mockActivity, mockStats, mockSystemStatus } from './data.mock';
 import type { ActivityItem, StatItem, SystemStatusItem } from './types';
 
@@ -54,11 +55,44 @@ function saveState(state: DashboardState): void {
  * مفيش Backend ولا API — Local Storage بس، حسب فلسفة المشروع الحالية.
  */
 export function useDashboard() {
-  const [state] = useState<DashboardState>(() => loadState());
+  const [state, setState] = useState<DashboardState>(() => loadState());
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setIsLoading(false);
+    let isMounted = true;
+
+    getBackendStatus()
+      .then((status) => {
+        if (!isMounted) return;
+        setState((current) => ({
+          ...current,
+          stats: [
+            { label: 'Active Nodes', value: status.active_nodes },
+            { label: 'Threat Level', value: status.threat_level },
+            { label: 'Security Mode', value: status.security_mode },
+          ],
+          systemStatus: [
+            { label: 'Backend', tone: status.system === 'ONLINE' ? 'success' : 'muted' },
+            { label: 'Hive Mind', tone: status.hive_mind === 'CONNECTED' ? 'success' : 'muted' },
+            { label: 'Uplink', tone: status.uplink.includes('SECURE') ? 'success' : 'muted' },
+          ],
+        }));
+        setError(null);
+      })
+      .catch((requestError) => {
+        if (!isMounted) return;
+        const message = requestError instanceof Error ? requestError.message : 'Dashboard request failed';
+        logger.warn('Failed to load dashboard data from backend — using local state', { error: requestError }, 'dashboard');
+        setError(message);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -71,5 +105,6 @@ export function useDashboard() {
     activity: state.activity,
     systemStatus: state.systemStatus,
     isLoading,
+    error,
   };
 }

@@ -1,6 +1,6 @@
 export interface StatItem {
   label: string;
-  value: number;
+  value: number | string;
 }
 
 export interface ActivityItem {
