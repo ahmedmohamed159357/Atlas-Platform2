@@ -1,4 +1,4 @@
-import { requestJson, type RequestOptions } from './transportClient';
+import { requestJson } from './transportClient';
 
 function buildPath(path: string, params?: Record<string, string | number | boolean>): string {
   const normalized = path.startsWith('/') ? path : `/${path}`;

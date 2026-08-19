@@ -1,5 +1,5 @@
 import { logger } from '@utils/logger';
-import { hiveGet, hivePost, hivePut, hiveDelete, type HiveEnvelope } from './hiveClient';
+import { hiveGet, hivePost, hivePut, hiveDelete } from './hiveClient';
 
 async function safeGet<T>(path: string, scope: string): Promise<T | null> {
   try {
