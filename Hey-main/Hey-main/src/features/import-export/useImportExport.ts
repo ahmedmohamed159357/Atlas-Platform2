@@ -12,7 +12,60 @@ const MODULES_STORAGE_KEY = 'red_king.import_export.modules.v1';
 const BACKUP_HISTORY_STORAGE_KEY = 'red_king.import_export.backup_history.v1';
 const IMPORT_PREVIEW_STORAGE_KEY = 'red_king.import_export.import_preview.v1';
 const VALIDATION_CHECKS_STORAGE_KEY = 'red_king.import_export.validation_checks.v1';
+const BACKUP_DATA_PREFIX = 'red_king.backup.data.';
 const PROGRESS_STEP_MS = 180;
+
+interface BackupPayload {
+  version: 1;
+  createdAt: string;
+  modules: Record<string, unknown>;
+}
+
+function createBackupPayload(): BackupPayload {
+  const modules: Record<string, unknown> = {};
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key || !key.startsWith('red_king.') || key.startsWith(BACKUP_DATA_PREFIX)) continue;
+    const raw = localStorage.getItem(key);
+    if (raw === null) continue;
+    modules[key] = JSON.parse(raw);
+  }
+  return { version: 1, createdAt: new Date().toISOString(), modules };
+}
+
+function downloadBackup(payload: BackupPayload, fileName: string): void {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function restoreBackup(raw: string): boolean {
+  const parsed = JSON.parse(raw) as Partial<BackupPayload>;
+  if (parsed.version !== 1 || !parsed.modules || typeof parsed.modules !== 'object' || Array.isArray(parsed.modules)) {
+    throw new Error('Invalid backup format');
+  }
+
+  const entries = Object.entries(parsed.modules);
+  if (entries.some(([key, value]) => !key.startsWith('red_king.') || key.startsWith(BACKUP_DATA_PREFIX) || value === undefined)) {
+    throw new Error('Invalid backup module data');
+  }
+
+  const previous = new Map(entries.map(([key]) => [key, localStorage.getItem(key)]));
+  try {
+    entries.forEach(([key, value]) => localStorage.setItem(key, JSON.stringify(value)));
+  } catch (error) {
+    previous.forEach((value, key) => {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, value);
+    });
+    throw error;
+  }
+  return true;
+}
 
 function loadModules(): ModuleOption[] {
   try {
@@ -142,10 +195,32 @@ export function useImportExport() {
     setSelectedModuleIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   };
 
-  const startExport = () => exportOp.run(selectedModuleIds.length === 0);
+  const startExport = () => {
+    if (selectedModuleIds.length === 0) {
+      exportOp.run(true);
+      return;
+    }
+
+    try {
+      const payload = createBackupPayload();
+      const id = `backup-${Date.now()}`;
+      const fileName = `red_king_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      localStorage.setItem(`${BACKUP_DATA_PREFIX}${id}`, JSON.stringify(payload));
+      setBackupHistory((history) => [
+        { id, name: fileName, date: new Date().toLocaleString(), size: `${JSON.stringify(payload).length} B`, modules: selectedModuleIds.length },
+        ...history,
+      ]);
+      downloadBackup(payload, fileName);
+      exportOp.run(false);
+    } catch (error) {
+      logger.error('Failed to create backup', error, 'import-export');
+      exportOp.run(true);
+    }
+  };
 
   const chooseMockFile = () => {
-    setImportFileName('red_king_backup_2026-07-24.json');
+    const latest = loadBackupHistory()[0];
+    setImportFileName(latest?.name ?? null);
     importOp.reset();
   };
 
@@ -170,8 +245,17 @@ export function useImportExport() {
   const requestRestore = (id: string) => setRestoreTargetId(id);
   const cancelRestore = () => setRestoreTargetId(null);
   const confirmRestore = () => {
-    setRestoreTargetId(null);
-    importOp.run(false);
+    if (!restoreTargetId) return;
+    try {
+      const raw = localStorage.getItem(`${BACKUP_DATA_PREFIX}${restoreTargetId}`);
+      if (!raw) throw new Error('Backup data is unavailable');
+      restoreBackup(raw);
+      setRestoreTargetId(null);
+      importOp.run(false);
+    } catch (error) {
+      logger.warn('Rejected invalid backup restore', { error }, 'import-export');
+      importOp.run(true);
+    }
   };
 
   return {
