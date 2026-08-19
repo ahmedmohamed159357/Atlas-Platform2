@@ -109,3 +109,5 @@ export function useWorkspace() {
     addNote,
   };
 }
+
+export type WorkspaceController = ReturnType<typeof useWorkspace>;

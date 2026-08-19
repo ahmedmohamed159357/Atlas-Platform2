@@ -1,8 +1,7 @@
 import { Panel } from '@components/shared/Panel';
-import { useWorkspace } from '../useWorkspace';
+import type { ProjectFileNode } from '../types';
 
-export function ProjectExplorer() {
-  const { projectTree } = useWorkspace();
+export function ProjectExplorer({ projectTree }: { projectTree: ProjectFileNode[] }) {
 
   return (
     <Panel title="Project Explorer">

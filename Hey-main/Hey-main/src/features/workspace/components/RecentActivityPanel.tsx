@@ -1,8 +1,7 @@
 import { Panel } from '@components/shared/Panel';
-import { useWorkspace } from '../useWorkspace';
+import type { RecentActivityItem } from '../types';
 
-export function RecentActivityPanel() {
-  const { recentActivity } = useWorkspace();
+export function RecentActivityPanel({ recentActivity }: { recentActivity: RecentActivityItem[] }) {
 
   return (
     <Panel title="Recent Activity">

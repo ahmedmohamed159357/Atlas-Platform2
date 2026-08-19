@@ -1,8 +1,7 @@
 import { Panel } from '@components/shared/Panel';
-import { useWorkspace } from '../useWorkspace';
+import type { FavoriteItem } from '../types';
 
-export function FavoritesPanel() {
-  const { favorites } = useWorkspace();
+export function FavoritesPanel({ favorites }: { favorites: FavoriteItem[] }) {
 
   return (
     <Panel title="Favorites">

@@ -1,9 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Panel, Input, Badge } from '@components/shared';
-import { useWorkspace } from '../useWorkspace';
+import type { SearchResultItem } from '../types';
 
-export function GlobalSearch() {
-  const { searchIndex } = useWorkspace();
+export function GlobalSearch({ searchIndex }: { searchIndex: SearchResultItem[] }) {
   const [query, setQuery] = useState('');
 
   const results = useMemo(

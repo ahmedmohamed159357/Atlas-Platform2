@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Panel, Input, Button } from '@components/shared';
-import { useWorkspace } from '../useWorkspace';
+import type { WorkspaceNoteItem } from '../types';
 
-export function NotesPanel() {
-  const { notes, addNote } = useWorkspace();
+export function NotesPanel({ notes, addNote }: { notes: WorkspaceNoteItem[]; addNote: (text: string) => void }) {
   const [draft, setDraft] = useState('');
 
   const handleAdd = () => {
