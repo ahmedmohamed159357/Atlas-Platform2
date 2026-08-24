@@ -10,12 +10,12 @@ interface CyberTextProps {
 
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*";
 
-const CyberText: React.FC<CyberTextProps> = ({ 
-    text, 
-    speed = 50, 
-    scrambleSpeed = 30, 
+const CyberText: React.FC<CyberTextProps> = ({
+    text,
+    speed = 50,
+    scrambleSpeed = 30,
     delay = 0,
-    className = "" 
+    className = ""
 }) => {
     const [display, setDisplay] = useState("");
     const [started, setStarted] = useState(false);
@@ -29,7 +29,7 @@ const CyberText: React.FC<CyberTextProps> = ({
         if (!started) return;
 
         let currentIndex = 0;
-        let scrambleInterval: NodeJS.Timeout;
+        let scrambleInterval: ReturnType<typeof setInterval>;
 
         const interval = setInterval(() => {
             if (currentIndex >= text.length) {

@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react';
 import ForceGraph3D from 'react-force-graph-3d';
 
+const TypedForceGraph3D = ForceGraph3D as any;
+
 // Graph Data Interfaces
 interface GraphNode {
     id: string;
@@ -35,13 +37,13 @@ const NeuralMesh = () => {
                     const data = await res.json();
                     setGraphData(data);
                 }
-            } catch (e) {}
+            } catch (e) { }
         };
 
         // Interaction socket for pulses
         const socket = new WebSocket("ws://localhost:9001/api/hive/stream/GLOBAL"); // Placeholder or similar
         // Actually, since we don't have a specific global stream yet, we poll achievements and pulse on change
-        
+
         fetchTopology();
         const interval = setInterval(fetchTopology, 3000);
         return () => clearInterval(interval);
@@ -49,12 +51,12 @@ const NeuralMesh = () => {
 
     return (
         <div className="fixed inset-0 -z-10 opacity-60">
-            <ForceGraph3D
+            <TypedForceGraph3D
                 graphData={graphData}
                 nodeAutoColorBy="group"
                 nodeColor={node => {
                     if (node.id === 'SHADOW_RELAY' && pulse) return '#ffffff';
-                    switch(node.group) {
+                    switch (node.group) {
                         case 1: return '#ff003c'; // King
                         case 2: return '#bd00ff'; // Zombie
                         case 3: return '#00ff41'; // Ghost
