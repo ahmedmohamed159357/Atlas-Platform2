@@ -54,7 +54,8 @@ class AgentJobLifecycle:
         return self._complete(job_id, status="succeeded", result=result)
 
     def failure(self, job_id: str, error: Any) -> dict[str, Any]:
-        return self._complete(job_id, status="failed", error=str(error))
+        stored_error = str(error) if isinstance(error, BaseException) else deepcopy(error)
+        return self._complete(job_id, status="failed", error=stored_error)
 
     def _complete(
         self,
@@ -62,7 +63,7 @@ class AgentJobLifecycle:
         *,
         status: str,
         result: Any = None,
-        error: Optional[str] = None,
+        error: Any = None,
     ) -> dict[str, Any]:
         job = self._job(job_id)
         if job["status"] in {"succeeded", "failed"}:

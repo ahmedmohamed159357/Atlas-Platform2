@@ -1,9 +1,14 @@
+from pathlib import Path
+
 from external_agent_adapter import (
+    AdapterError,
     AgentJobLifecycle,
     ExternalAgentAdapter,
     ExternalAgentOrchestrator,
 )
 from itertools import count
+
+import pytest
 
 
 class FakeAdapter:
@@ -46,7 +51,65 @@ def test_orchestrator_records_failure_and_captures_error():
 
     assert job["status"] == "failed"
     assert job["result"] is None
-    assert job["error"] == "upstream unavailable"
+    assert job["error"] == {
+        "type": "operation_error",
+        "message": "upstream unavailable",
+    }
+
+
+def test_orchestrator_captures_public_structured_adapter_error():
+    adapter = FakeAdapter(
+        error=AdapterError(404, "Investigation not found", {"detail": "missing"})
+    )
+    orchestrator = make_orchestrator(adapter)
+
+    job = orchestrator.run_status()
+
+    assert job["status"] == "failed"
+    assert job["error"] == {
+        "type": "adapter_error",
+        "message": "Investigation not found",
+        "status": 404,
+        "details": {"detail": "missing"},
+    }
+    assert orchestrator.get_job(job["job_id"])["error"] == job["error"]
+
+
+def test_invalid_arguments_are_rejected_before_adapter_invocation():
+    adapter = FakeAdapter()
+    orchestrator = make_orchestrator(adapter)
+
+    for operation in (
+        lambda: orchestrator.run_create_investigation("  "),
+        lambda: orchestrator.run_update_investigation("inv-1"),
+        lambda: orchestrator.run_investigation_timeline(""),
+        lambda: orchestrator.run_get_storage(" "),
+        lambda: orchestrator.run_list_investigations(status=42),
+    ):
+        with pytest.raises(ValueError):
+            operation()
+
+    assert adapter.calls == []
+
+
+def test_orchestrator_allows_only_one_terminal_transition():
+    adapter = FakeAdapter(error=RuntimeError("upstream unavailable"))
+    orchestrator = make_orchestrator(adapter)
+
+    job = orchestrator.run_status()
+
+    assert job["status"] == "failed"
+    with pytest.raises(ValueError, match="already complete"):
+        orchestrator.lifecycle.success(job["job_id"], {"late": True})
+
+
+def test_orchestrator_has_no_core_or_ranking_imports():
+    source = (Path(__file__).parents[1] / "orchestrator.py").read_text()
+
+    assert "import core" not in source
+    assert "import ranking" not in source
+    assert "from core" not in source
+    assert "from ranking" not in source
 
 
 def test_orchestrator_generates_unique_job_ids():

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from .client import ExternalAgentAdapter
+from .client import AdapterError, ExternalAgentAdapter
 from .lifecycle import AgentJobLifecycle
 
 
@@ -31,6 +31,8 @@ class ExternalAgentOrchestrator:
     def run_list_investigations(
         self, *, status: Optional[str] = None, query: Optional[str] = None
     ) -> dict[str, Any]:
+        self._validate_optional_text("status", status)
+        self._validate_optional_text("query", query)
         arguments = {key: value for key, value in (("status", status), ("query", query)) if value is not None}
         return self._run(
             "list_investigations",
@@ -39,6 +41,8 @@ class ExternalAgentOrchestrator:
         )
 
     def run_create_investigation(self, title: str, *, status: str = "open") -> dict[str, Any]:
+        self._validate_text("title", title)
+        self._validate_text("status", status)
         return self._run(
             "create_investigation",
             {"title": title, "status": status},
@@ -52,6 +56,11 @@ class ExternalAgentOrchestrator:
         title: Optional[str] = None,
         status: Optional[str] = None,
     ) -> dict[str, Any]:
+        self._validate_text("investigation_id", investigation_id)
+        self._validate_optional_text("title", title)
+        self._validate_optional_text("status", status)
+        if title is None and status is None:
+            raise ValueError("At least one update field is required")
         arguments = {
             key: value
             for key, value in (
@@ -70,6 +79,7 @@ class ExternalAgentOrchestrator:
         )
 
     def run_investigation_timeline(self, investigation_id: str) -> dict[str, Any]:
+        self._validate_text("investigation_id", investigation_id)
         return self._run(
             "investigation_timeline",
             {"investigation_id": investigation_id},
@@ -77,6 +87,7 @@ class ExternalAgentOrchestrator:
         )
 
     def run_investigation_evidence(self, investigation_id: str) -> dict[str, Any]:
+        self._validate_text("investigation_id", investigation_id)
         return self._run(
             "investigation_evidence",
             {"investigation_id": investigation_id},
@@ -84,6 +95,7 @@ class ExternalAgentOrchestrator:
         )
 
     def run_get_storage(self, key: str) -> dict[str, Any]:
+        self._validate_text("key", key)
         return self._run(
             "get_storage",
             {"key": key},
@@ -91,6 +103,7 @@ class ExternalAgentOrchestrator:
         )
 
     def run_set_storage(self, key: str, value: Any) -> dict[str, Any]:
+        self._validate_text("key", key)
         return self._run(
             "set_storage",
             {"key": key, "value": value},
@@ -98,6 +111,7 @@ class ExternalAgentOrchestrator:
         )
 
     def run_delete_storage(self, key: str) -> dict[str, Any]:
+        self._validate_text("key", key)
         return self._run(
             "delete_storage",
             {"key": key},
@@ -119,6 +133,32 @@ class ExternalAgentOrchestrator:
         job = self.lifecycle.submit({"operation": operation, "arguments": arguments})
         job_id = job["job_id"]
         try:
-            return self.lifecycle.success(job_id, action())
+            result = action()
         except Exception as error:
-            return self.lifecycle.failure(job_id, error)
+            return self.lifecycle.failure(job_id, self._error_details(error))
+        return self.lifecycle.success(job_id, result)
+
+    @staticmethod
+    def _validate_text(name: str, value: Any) -> None:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{name} must be a non-empty string")
+
+    @classmethod
+    def _validate_optional_text(cls, name: str, value: Any) -> None:
+        if value is not None:
+            cls._validate_text(name, value)
+
+    @staticmethod
+    def _error_details(error: Exception) -> dict[str, Any]:
+        if isinstance(error, AdapterError):
+            return {
+                "type": "adapter_error",
+                "message": error.message,
+                "status": error.status,
+                "details": error.payload,
+            }
+        if isinstance(error, PermissionError):
+            return {"type": "permission_error", "message": str(error)}
+        if isinstance(error, NotImplementedError):
+            return {"type": "unsupported_operation", "message": str(error)}
+        return {"type": "operation_error", "message": str(error)}
