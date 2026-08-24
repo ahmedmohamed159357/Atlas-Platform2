@@ -2,5 +2,11 @@
 
 from .client import AdapterError, ExternalAgentAdapter
 from .lifecycle import AgentJobLifecycle
+from .orchestrator import ExternalAgentOrchestrator
 
-__all__ = ["AdapterError", "AgentJobLifecycle", "ExternalAgentAdapter"]
+__all__ = [
+	"AdapterError",
+	"AgentJobLifecycle",
+	"ExternalAgentAdapter",
+	"ExternalAgentOrchestrator",
+]
