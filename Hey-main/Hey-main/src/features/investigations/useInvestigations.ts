@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { logger } from '@utils/logger';
+import { loadFeatureDataRemote, saveFeatureData } from '@/lib/api/storageAdapter';
 import { mockEvidence, mockInvestigations, mockTimeline } from './data.mock';
 import type { Evidence, Investigation, TimelineEvent } from './types';
 
@@ -57,12 +58,28 @@ export function useInvestigations() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    setState(loadState());
-    setIsLoading(false);
+    let isMounted = true;
+
+    void loadFeatureDataRemote<InvestigationsState>(STORAGE_KEY, defaultState(), 'investigations').then((value) => {
+      if (!isMounted) return;
+      setState(value);
+      setIsLoading(false);
+    }).catch((error) => {
+      logger.warn('Failed to hydrate investigations from remote storage — falling back to local state', { error }, 'investigations');
+      if (isMounted) {
+        setState(loadState());
+        setIsLoading(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
     if (isLoading) return;
+    void saveFeatureData(STORAGE_KEY, state, 'investigations');
     saveState(state);
   }, [state, isLoading]);
 

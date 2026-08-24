@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { logger } from '@utils/logger';
+import { loadFeatureDataRemote, saveFeatureData } from '@/lib/api/storageAdapter';
 import { mockFavorites, mockProjectTree, mockRecent, mockSearchResults } from './data.mock';
 import type {
   FavoriteItem,
@@ -70,21 +71,36 @@ function saveState(state: WorkspaceState): void {
 }
 
 /**
- * Hook مسؤول عن الـ Domain Data الخاصة بميزة Workspace بالكامل:
- * تحميل + حفظ تلقائي في Local Storage، بنفس نمط useNotes.ts —
- * مفيش Backend ولا API — Local Storage بس، حسب فلسفة المشروع الحالية.
+ * Hook responsible for the workspace domain data with the established storage adapter.
+ * Remote persistence is the primary path; local storage remains the safe fallback.
  */
 export function useWorkspace() {
-  const [state, setState] = useState<WorkspaceState>(loadState);
+  const [state, setState] = useState<WorkspaceState>(defaultState);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    setState(loadState());
-    setIsLoading(false);
+    let isMounted = true;
+
+    void loadFeatureDataRemote<WorkspaceState>(STORAGE_KEY, defaultState(), 'workspace').then((value) => {
+      if (!isMounted) return;
+      setState(value);
+      setIsLoading(false);
+    }).catch((error) => {
+      logger.warn('Failed to hydrate workspace from remote storage — falling back to local state', { error }, 'workspace');
+      if (isMounted) {
+        setState(loadState());
+        setIsLoading(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
     if (isLoading) return;
+    void saveFeatureData(STORAGE_KEY, state, 'workspace');
     saveState(state);
   }, [state, isLoading]);
 

@@ -50,3 +50,56 @@ async def test_api_consult_mocked(test_client, monkeypatch):
     response = test_client.post("/api/consult", json={"query": "How to hack?"})
     assert response.status_code == 200
     assert response.json()["response"] == "Mocked Advice"
+
+
+@pytest.mark.integration
+def test_storage_lifecycle(test_client):
+    """Verify the generic storage key/value API persists and deletes data."""
+    key = "phase14_temp_store"
+    payload = {"value": {"status": "ok", "count": 2}}
+
+    create_response = test_client.post(f"/api/storage/{key}", json=payload)
+    assert create_response.status_code == 200
+    assert create_response.json()["value"] == payload["value"]
+
+    get_response = test_client.get(f"/api/storage/{key}")
+    assert get_response.status_code == 200
+    assert get_response.json()["value"] == payload["value"]
+
+    delete_response = test_client.delete(f"/api/storage/{key}")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["deleted"] is True
+
+    missing_response = test_client.get(f"/api/storage/{key}")
+    assert missing_response.status_code == 404
+
+
+@pytest.mark.integration
+def test_investigation_lifecycle(test_client):
+    """Verify investigation list/create/update/delete routes work with the frontend contract."""
+    payload = {"title": "Phase 14 Test Investigation", "status": "open"}
+
+    create_response = test_client.post("/api/investigations", json=payload)
+    assert create_response.status_code == 200
+    created = create_response.json()["investigation"]
+    assert created["title"] == payload["title"]
+    investigation_id = created["id"]
+
+    list_response = test_client.get("/api/investigations")
+    assert list_response.status_code == 200
+    investigations = list_response.json()["investigations"]
+    assert any(item["id"] == investigation_id for item in investigations)
+
+    update_response = test_client.put(f"/api/investigations/{investigation_id}", json={"status": "in-progress"})
+    assert update_response.status_code == 200
+    assert update_response.json()["investigation"]["status"] == "in-progress"
+
+    timeline_response = test_client.get(f"/api/investigations/{investigation_id}/timeline")
+    assert timeline_response.status_code == 200
+
+    evidence_response = test_client.get(f"/api/investigations/{investigation_id}/evidence")
+    assert evidence_response.status_code == 200
+
+    delete_response = test_client.delete(f"/api/investigations/{investigation_id}")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["deleted"] is True

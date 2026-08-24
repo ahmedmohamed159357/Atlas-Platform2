@@ -1,0 +1,58 @@
+{
+  "red_king.investigations.v1": {
+    "investigations": [
+      {
+        "id": "inv-1",
+        "title": "Suspicious login pattern",
+        "status": "open",
+        "updatedAt": "2024-01-01T00:00:00Z"
+      },
+      {
+        "id": "inv-2",
+        "title": "Unusual outbound traffic",
+        "status": "in-progress",
+        "updatedAt": "2024-01-01T00:00:00Z"
+      },
+      {
+        "id": "inv-3",
+        "title": "Phishing attempt review",
+        "status": "closed",
+        "updatedAt": "2024-01-01T00:00:00Z"
+      }
+    ],
+    "timeline": [
+      {
+        "id": "t1",
+        "investigationId": "inv-1",
+        "label": "Investigation opened",
+        "time": "2024-01-01T00:00:00Z"
+      },
+      {
+        "id": "t2",
+        "investigationId": "inv-1",
+        "label": "Note added",
+        "time": "2024-01-01T00:15:00Z"
+      },
+      {
+        "id": "t3",
+        "investigationId": "inv-1",
+        "label": "Status changed to open",
+        "time": "2024-01-01T00:30:00Z"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "e1",
+        "investigationId": "inv-1",
+        "name": "login_screenshot.png",
+        "kind": "image"
+      },
+      {
+        "id": "e2",
+        "investigationId": "inv-1",
+        "name": "notes.txt",
+        "kind": "note"
+      }
+    ]
+  }
+}

@@ -16,6 +16,9 @@ from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from strawberry.fastapi import GraphQLRouter
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from threading import RLock
 from .graph.schema import schema
 from .core.database import sovereign_db
 from .core.resurrection import resurrector
@@ -54,7 +57,7 @@ if not SECRET_PASSPHRASE:
     # HARD STOP ON SECURITY FAILURE
     logger.critical("CRITICAL SECURITY ERROR: SECRET_PASSPHRASE is not set. Halting.")
     raise ValueError("CRITICAL SECURITY ERROR: SECRET_PASSPHRASE is not set in .env. Server refuses to start silently.")
-    
+
 # Convert to bytes
 SECRET_PASSPHRASE = SECRET_PASSPHRASE.encode()
 
@@ -70,15 +73,85 @@ app = FastAPI(
     version="1.1.0",
 )
 
+
+class JsonFileStore:
+    """Small JSON-backed key/value store with atomic writes for browser-style persistence."""
+
+    def __init__(self, file_path: str):
+        self.file_path = Path(file_path)
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = RLock()
+        self._data = self._load()
+
+    def _load(self) -> Dict[str, Any]:
+        if not self.file_path.exists():
+            return {}
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+                return loaded if isinstance(loaded, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            logger.warning(f"Failed to load JSON store from {self.file_path}; creating a fresh store.")
+            return {}
+
+    def _write_atomic(self) -> None:
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile("w", encoding="utf-8", dir=str(self.file_path.parent), delete=False) as handle:
+            json.dump(self._data, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(handle.name, self.file_path)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        with self._lock:
+            return self._data.get(key, default)
+
+    def set(self, key: str, value: Any) -> Any:
+        with self._lock:
+            self._data[key] = value
+            self._write_atomic()
+            return value
+
+    def delete(self, key: str) -> bool:
+        with self._lock:
+            if key not in self._data:
+                return False
+            del self._data[key]
+            self._write_atomic()
+            return True
+
+
+feature_store = JsonFileStore("persistence/frontend_store.json")
+
+
+def default_investigation_state() -> Dict[str, List[Dict[str, Any]]]:
+    return {
+        "investigations": [
+            {"id": "inv-1", "title": "Suspicious login pattern", "status": "open", "updatedAt": "2024-01-01T00:00:00Z"},
+            {"id": "inv-2", "title": "Unusual outbound traffic", "status": "in-progress", "updatedAt": "2024-01-01T00:00:00Z"},
+            {"id": "inv-3", "title": "Phishing attempt review", "status": "closed", "updatedAt": "2024-01-01T00:00:00Z"},
+        ],
+        "timeline": [
+            {"id": "t1", "investigationId": "inv-1", "label": "Investigation opened", "time": "2024-01-01T00:00:00Z"},
+            {"id": "t2", "investigationId": "inv-1", "label": "Note added", "time": "2024-01-01T00:15:00Z"},
+            {"id": "t3", "investigationId": "inv-1", "label": "Status changed to open", "time": "2024-01-01T00:30:00Z"},
+        ],
+        "evidence": [
+            {"id": "e1", "investigationId": "inv-1", "name": "login_screenshot.png", "kind": "image"},
+            {"id": "e2", "investigationId": "inv-1", "name": "notes.txt", "kind": "note"},
+        ],
+    }
+
+
 # --- MIDDLEWARE & HANDLERS ---
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     request_id = str(uuid.uuid4())[:8]
     start_time = time.time()
-    
+
     logger.debug(f"Request: {request.method} {request.url.path} (ID: {request_id})")
-    
+
     try:
         response = await call_next(request)
         process_time = (time.time() - start_time) * 1000
@@ -126,6 +199,149 @@ async def get_system_status():
 async def list_agents():
     """Returns the list of active agents."""
     return list(sovereign_db.get_agents().values())
+
+
+@app.get("/api/dashboard")
+async def get_dashboard():
+    """Minimal dashboard summary for the frontend/health check contract."""
+    investigations = feature_store.get("red_king.investigations.v1", default_investigation_state())
+    investigation_list = investigations.get("investigations", []) if isinstance(investigations, dict) else []
+    return {
+        "system": "ONLINE",
+        "status": "OK",
+        "active_nodes": 52,
+        "investigations": len(investigation_list),
+        "alerts": 0,
+    }
+
+
+@app.get("/api/storage/{key}")
+async def get_storage_value(key: str):
+    value = feature_store.get(key)
+    if value is None:
+        raise HTTPException(status_code=404, detail="Storage key not found")
+    return {"value": value}
+
+
+@app.post("/api/storage/{key}")
+async def set_storage_value(key: str, payload: Dict[str, Any]):
+    value = payload.get("value") if isinstance(payload, dict) and "value" in payload else payload
+    feature_store.set(key, value)
+    return {"value": value}
+
+
+@app.delete("/api/storage/{key}")
+async def delete_storage_value(key: str):
+    deleted = feature_store.delete(key)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Storage key not found")
+    return {"deleted": True, "key": key}
+
+
+@app.get("/api/investigations")
+async def list_investigations(status: Optional[str] = None, q: Optional[str] = None):
+    state = feature_store.get("red_king.investigations.v1", default_investigation_state())
+    if not isinstance(state, dict):
+        state = default_investigation_state()
+    investigations = list(state.get("investigations", []))
+    if status:
+        investigations = [item for item in investigations if item.get("status") == status]
+    if q:
+        q_value = q.lower()
+        investigations = [item for item in investigations if q_value in str(item.get("title", "")).lower()]
+    return {"investigations": investigations}
+
+
+@app.post("/api/investigations")
+async def create_investigation(payload: Dict[str, Any]):
+    title = str(payload.get("title", "")).strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    state = feature_store.get("red_king.investigations.v1", default_investigation_state())
+    if not isinstance(state, dict):
+        state = default_investigation_state()
+
+    investigation = {
+        "id": str(uuid.uuid4()),
+        "title": title,
+        "status": payload.get("status", "open"),
+        "updatedAt": datetime.now().isoformat(),
+    }
+    state.setdefault("investigations", [])
+    state["investigations"].append(investigation)
+    feature_store.set("red_king.investigations.v1", state)
+    state.setdefault("timeline", [])
+    state["timeline"].append({
+        "id": str(uuid.uuid4()),
+        "investigationId": investigation["id"],
+        "label": "Investigation opened",
+        "time": investigation["updatedAt"],
+    })
+    feature_store.set("red_king.investigations.v1", state)
+    return {"investigation": investigation}
+
+
+@app.put("/api/investigations/{investigation_id}")
+async def update_investigation(investigation_id: str, payload: Dict[str, Any]):
+    state = feature_store.get("red_king.investigations.v1", default_investigation_state())
+    if not isinstance(state, dict):
+        state = default_investigation_state()
+    investigations = state.setdefault("investigations", [])
+    investigation = next((item for item in investigations if item.get("id") == investigation_id), None)
+    if investigation is None:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    if "title" in payload and payload["title"] is not None:
+        investigation["title"] = str(payload["title"]).strip()
+    if "status" in payload and payload["status"] is not None:
+        investigation["status"] = payload["status"]
+    investigation["updatedAt"] = datetime.now().isoformat()
+
+    timeline = state.setdefault("timeline", [])
+    if "status" in payload and payload["status"] is not None:
+        timeline.append({
+            "id": str(uuid.uuid4()),
+            "investigationId": investigation_id,
+            "label": f"Status changed to {payload['status']}",
+            "time": investigation["updatedAt"],
+        })
+    feature_store.set("red_king.investigations.v1", state)
+    return {"investigation": investigation}
+
+
+@app.delete("/api/investigations/{investigation_id}")
+async def delete_investigation(investigation_id: str):
+    state = feature_store.get("red_king.investigations.v1", default_investigation_state())
+    if not isinstance(state, dict):
+        state = default_investigation_state()
+    investigations = state.get("investigations", [])
+    original_count = len(investigations)
+    state["investigations"] = [item for item in investigations if item.get("id") != investigation_id]
+    state["timeline"] = [item for item in state.get("timeline", []) if item.get("investigationId") != investigation_id]
+    state["evidence"] = [item for item in state.get("evidence", []) if item.get("investigationId") != investigation_id]
+    feature_store.set("red_king.investigations.v1", state)
+    if len(state["investigations"]) == original_count:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    return {"deleted": True, "id": investigation_id}
+
+
+@app.get("/api/investigations/{investigation_id}/timeline")
+async def get_investigation_timeline(investigation_id: str):
+    state = feature_store.get("red_king.investigations.v1", default_investigation_state())
+    if not isinstance(state, dict):
+        state = default_investigation_state()
+    timeline = [item for item in state.get("timeline", []) if item.get("investigationId") == investigation_id]
+    return {"timeline": timeline}
+
+
+@app.get("/api/investigations/{investigation_id}/evidence")
+async def get_investigation_evidence(investigation_id: str):
+    state = feature_store.get("red_king.investigations.v1", default_investigation_state())
+    if not isinstance(state, dict):
+        state = default_investigation_state()
+    evidence = [item for item in state.get("evidence", []) if item.get("investigationId") == investigation_id]
+    return {"evidence": evidence}
 
 
 @app.post("/api/scan", dependencies=[Depends(check_strict_limit)])
@@ -491,7 +707,7 @@ async def agent_checkin(payload: StrictAgentCheckIn):
 
         # 3. CALCULATE JITTER (45: Jitter & Heartbeat)
         random_jitter = random.randint(5, 30)
-        
+
         # 4. GATHER PEERS (45: P2P Shadow Mesh)
         all_agents = sovereign_db.get_agents()
         peers = [{"id": aid, "ip": d.get("ip")} for aid, d in all_agents.items() if aid != agent_id]
@@ -543,13 +759,13 @@ async def agent_report(payload: Dict[str, Any]):
     """
     try:
         raw_data = payload.get("data")
-        
+
         # Check for Fragmentation
         if payload.get("fragmented"):
             sid = payload.get("session_id")
             p_idx = payload.get("part")
             p_total = payload.get("total")
-            
+
             # Add to reassembly buffer
             reassembled = fragmenter.add_fragment(sid, p_idx, p_total, raw_data)
             if not reassembled:
@@ -558,29 +774,29 @@ async def agent_report(payload: Dict[str, Any]):
 
         decrypted_json = cipher_engine.decrypt(raw_data)
         data = json.loads(decrypted_json)
-        
+
         agent_id = data.get("agent_id")
         report_type = data.get("type")
-        
+
         # P2P RELAY (45): If Agent A is reporting for Agent B
         if data.get("relay_from"):
             relay_id = data.get("relay_from")
             add_intel("SHADOW_MESH", f"RELAY: Agent {agent_id[:8]} passing data for {relay_id[:8]}")
             # Update Shadow Mesh in DB
             sovereign_db.add_shadow_link(agent_id, relay_id)
-            # Recursively process or just handle here... 
+            # Recursively process or just handle here...
             # For now, treat as a direct report but mark origin
-            agent_id = relay_id 
-        
+            agent_id = relay_id
+
         if report_type == "screen":
             # Broadcast the frame to subscribers
             frame = data.get("frame")
             await manager.broadcast_stream(agent_id, frame)
             return {"status": "STREAMED"}
-            
+
         elif report_type == "log":
             add_intel("LOG", f"Agent {agent_id[:8]} report: {data.get('msg')}")
-            
+
         return {"status": "ACK"}
     except Exception as e:
         logger.error(f"[!] Report Processing Error: {e}")
