@@ -3,6 +3,7 @@ from pathlib import Path
 from external_agent_adapter import (
     AdapterError,
     AgentJobLifecycle,
+    AgentExecutionPolicy,
     ExternalAgentAdapter,
     ExternalAgentOrchestrator,
 )
@@ -110,6 +111,29 @@ def test_orchestrator_has_no_core_or_ranking_imports():
     assert "import ranking" not in source
     assert "from core" not in source
     assert "from ranking" not in source
+
+
+def test_compatibility_policy_preserves_existing_default_behavior():
+    adapter = FakeAdapter()
+    orchestrator = make_orchestrator(adapter)
+
+    assert orchestrator.run_status()["status"] == "succeeded"
+    assert orchestrator.policy.allowed_operations == AgentExecutionPolicy.KNOWN_OPERATIONS
+
+
+def test_explicit_policy_rejects_before_adapter_invocation():
+    adapter = FakeAdapter()
+    lifecycle = AgentJobLifecycle(adapter, id_factory=lambda: "job-policy")
+    orchestrator = ExternalAgentOrchestrator(
+        adapter, lifecycle, policy=AgentExecutionPolicy.read_only()
+    )
+
+    with pytest.raises(PermissionError, match="not permitted"):
+        orchestrator.run_create_investigation("Review login")
+
+    assert adapter.calls == []
+    with pytest.raises(KeyError, match="Unknown job"):
+        orchestrator.get_job("job-policy")
 
 
 def test_orchestrator_generates_unique_job_ids():

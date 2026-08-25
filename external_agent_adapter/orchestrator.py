@@ -6,6 +6,7 @@ from typing import Any, Callable, Optional
 
 from .client import AdapterError, ExternalAgentAdapter
 from .lifecycle import AgentJobLifecycle
+from .policy import AgentExecutionPolicy
 
 
 class ExternalAgentOrchestrator:
@@ -15,9 +16,11 @@ class ExternalAgentOrchestrator:
         self,
         adapter: ExternalAgentAdapter,
         lifecycle: AgentJobLifecycle,
+        policy: AgentExecutionPolicy | None = None,
     ) -> None:
         self.adapter = adapter
         self.lifecycle = lifecycle
+        self.policy = policy or AgentExecutionPolicy.compatibility()
 
     def get_job(self, job_id: str) -> dict[str, Any]:
         return self.lifecycle.status(job_id)
@@ -130,6 +133,7 @@ class ExternalAgentOrchestrator:
         arguments: dict[str, Any],
         action: Callable[[], Any],
     ) -> dict[str, Any]:
+        self.policy.require(operation)
         job = self.lifecycle.submit({"operation": operation, "arguments": arguments})
         job_id = job["job_id"]
         try:
